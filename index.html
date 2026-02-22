@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monthly Expense Tracker</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="top-bar">
+      <div>
+        <p class="eyebrow">Household Finance</p>
+        <h1>Monthly Expense Tracker</h1>
+      </div>
+      <label class="account-switcher">
+        Account
+        <select id="accountSelect" aria-label="Select account"></select>
+      </label>
+    </header>
+
+    <section class="dashboard-grid" aria-label="Budget insights">
+      <article class="card metric-card">
+        <p>Total Budget</p>
+        <h2 id="totalBudget">$0.00</h2>
+      </article>
+      <article class="card metric-card">
+        <p>Total Spent (Month)</p>
+        <h2 id="totalSpent">$0.00</h2>
+      </article>
+      <article class="card metric-card">
+        <p>Remaining</p>
+        <h2 id="remainingBudget">$0.00</h2>
+      </article>
+      <article class="card metric-card">
+        <p>Overspent Categories</p>
+        <h2 id="overspentCount">0</h2>
+      </article>
+    </section>
+
+    <section class="content-grid">
+      <article class="card">
+        <div class="section-title">
+          <h3>Expense Categories & Budgets</h3>
+          <p>Start empty and build your own budget plan.</p>
+        </div>
+        <form id="categoryForm" class="stack-form" autocomplete="off">
+          <label>
+            Category name
+            <input type="text" id="categoryName" placeholder="e.g. Groceries" required />
+          </label>
+          <label>
+            Monthly budget
+            <input type="number" id="categoryBudget" min="0" step="0.01" placeholder="0.00" required />
+          </label>
+          <button type="submit">Add category</button>
+        </form>
+        <div id="categoryState" class="empty-state">No categories yet.</div>
+        <ul id="categoryList" class="list"></ul>
+      </article>
+
+      <article class="card">
+        <div class="section-title">
+          <h3>Add Expense</h3>
+          <p>Log spending for the active account.</p>
+        </div>
+        <form id="expenseForm" class="stack-form" autocomplete="off">
+          <label>
+            Category
+            <select id="expenseCategory" required></select>
+          </label>
+          <label>
+            Amount
+            <input type="number" id="expenseAmount" min="0.01" step="0.01" placeholder="0.00" required />
+          </label>
+          <label>
+            Date
+            <input type="date" id="expenseDate" required />
+          </label>
+          <button type="submit">Add expense</button>
+        </form>
+        <div id="expenseState" class="empty-state">Add a category to begin tracking expenses.</div>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <h3>Monthly Spend by Category</h3>
+        <p>Quick overview of performance against budget.</p>
+      </div>
+      <div id="summaryState" class="empty-state">No categories to summarize.</div>
+      <ul id="summaryList" class="list summary-list"></ul>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <h3>Recent Expenses</h3>
+        <p>Most recent transactions for this month.</p>
+      </div>
+      <div id="transactionState" class="empty-state">No expenses added yet.</div>
+      <ul id="transactionList" class="list"></ul>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
