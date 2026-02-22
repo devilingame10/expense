@@ -18,6 +18,13 @@ const els = {
   summaryState: document.getElementById("summaryState"),
   transactionList: document.getElementById("transactionList"),
   transactionState: document.getElementById("transactionState"),
+  importUsersForm: document.getElementById("importUsersForm"),
+  importBudgetsForm: document.getElementById("importBudgetsForm"),
+  importExpensesForm: document.getElementById("importExpensesForm"),
+  usersCsv: document.getElementById("usersCsv"),
+  budgetsCsv: document.getElementById("budgetsCsv"),
+  expensesCsv: document.getElementById("expensesCsv"),
+  importStatus: document.getElementById("importStatus"),
 };
 
 const state = {
@@ -88,12 +95,54 @@ function wireEvents() {
     els.expenseAmount.value = "";
     await refreshData();
   });
+
+  els.importUsersForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await uploadCsv("users", els.usersCsv.files[0]);
+  });
+
+  els.importBudgetsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await uploadCsv("budgets", els.budgetsCsv.files[0]);
+  });
+
+  els.importExpensesForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await uploadCsv("expenses", els.expensesCsv.files[0]);
+  });
+}
+
+async function uploadCsv(table, file) {
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append("csvfile", file);
+
+  const res = await fetch(`/api/import/${table}`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const body = await res.json();
+    els.importStatus.textContent = body.error || `Failed to import ${table}.csv`;
+    return;
+  }
+
+  els.importStatus.textContent = `Imported ${table}.csv successfully.`;
+  await loadUsers();
+  await refreshData();
 }
 
 async function loadUsers() {
   const users = await fetchJson("/api/users");
   state.users = users;
-  if (!state.activeUserId && users.length) state.activeUserId = users[0].id;
+
+  if (users.length === 0) {
+    state.activeUserId = null;
+  } else if (!users.some((user) => user.id === state.activeUserId)) {
+    state.activeUserId = users[0].id;
+  }
 
   els.accountSelect.innerHTML = "";
   users.forEach((user) => {
@@ -106,7 +155,12 @@ async function loadUsers() {
 }
 
 async function refreshData() {
-  if (!state.activeUserId) return;
+  if (!state.activeUserId) {
+    state.budgets = [];
+    state.expenses = [];
+    render();
+    return;
+  }
 
   const month = currentMonth();
   const [budgets, expenses] = await Promise.all([

@@ -85,6 +85,42 @@
 
     <section class="card">
       <div class="section-title">
+        <h3>Excel Access & Edit</h3>
+        <p>Click to download CSV files, edit in Excel, then upload to update the database.</p>
+      </div>
+
+      <div class="excel-links">
+        <a href="/api/export/users.csv">Download users.csv</a>
+        <a href="/api/export/budgets.csv">Download budgets.csv</a>
+        <a href="/api/export/expenses.csv">Download expenses.csv</a>
+      </div>
+
+      <form id="importUsersForm" class="stack-form import-form">
+        <label>Import users.csv
+          <input type="file" id="usersCsv" accept=".csv" required />
+        </label>
+        <button type="submit">Upload users.csv</button>
+      </form>
+
+      <form id="importBudgetsForm" class="stack-form import-form">
+        <label>Import budgets.csv
+          <input type="file" id="budgetsCsv" accept=".csv" required />
+        </label>
+        <button type="submit">Upload budgets.csv</button>
+      </form>
+
+      <form id="importExpensesForm" class="stack-form import-form">
+        <label>Import expenses.csv
+          <input type="file" id="expensesCsv" accept=".csv" required />
+        </label>
+        <button type="submit">Upload expenses.csv</button>
+      </form>
+
+      <p id="importStatus" class="empty-state"></p>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
         <h3>Monthly Spend by Category</h3>
         <p>Quick overview of performance against budget.</p>
       </div>

@@ -1,5 +1,8 @@
+import csv
+import io
 import json
 import sqlite3
+from cgi import FieldStorage
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -9,6 +12,7 @@ ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "expense.db"
 HOST = "0.0.0.0"
 PORT = 4173
+ALLOWED_TABLES = {"users", "budgets", "expenses"}
 
 
 def db_conn():
@@ -67,13 +71,23 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/users/"):
             return self.api_user_get(path, parse_qs(parsed.query))
 
+        if path.startswith("/api/export/") and path.endswith(".csv"):
+            table = path.split("/")[-1].replace(".csv", "")
+            return self.api_export_csv(table)
+
         return self.serve_static(path)
 
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+
         if path.startswith("/api/users/"):
             return self.api_user_post(path)
+
+        if path.startswith("/api/import/"):
+            table = path.split("/")[-1]
+            return self.api_import_csv(table)
+
         self.send_json({"error": "Not found"}, 404)
 
     def do_DELETE(self):
@@ -215,6 +229,104 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self.send_json({"error": "Not found"}, 404)
+
+    def api_export_csv(self, table):
+        if table not in ALLOWED_TABLES:
+            return self.send_json({"error": "Invalid table"}, 400)
+
+        query_map = {
+            "users": "SELECT id, name FROM users ORDER BY id",
+            "budgets": "SELECT id, user_id, category_name, monthly_budget FROM budgets ORDER BY id",
+            "expenses": "SELECT id, user_id, budget_id, amount, expense_date FROM expenses ORDER BY id",
+        }
+
+        with db_conn() as conn:
+            rows = conn.execute(query_map[table]).fetchall()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        if table == "users":
+            writer.writerow(["id", "name"])
+            for row in rows:
+                writer.writerow([row["id"], row["name"]])
+        elif table == "budgets":
+            writer.writerow(["id", "user_id", "category_name", "monthly_budget"])
+            for row in rows:
+                writer.writerow([row["id"], row["user_id"], row["category_name"], row["monthly_budget"]])
+        else:
+            writer.writerow(["id", "user_id", "budget_id", "amount", "expense_date"])
+            for row in rows:
+                writer.writerow([row["id"], row["user_id"], row["budget_id"], row["amount"], row["expense_date"]])
+
+        data = output.getvalue().encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", f'attachment; filename="{table}.csv"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def api_import_csv(self, table):
+        if table not in ALLOWED_TABLES:
+            return self.send_json({"error": "Invalid table"}, 400)
+
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            return self.send_json({"error": "Upload must be multipart/form-data"}, 400)
+
+        form = FieldStorage(
+            fp=self.rfile,
+            headers=self.headers,
+            environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type},
+        )
+
+        if "csvfile" not in form:
+            return self.send_json({"error": "Missing file field 'csvfile'"}, 400)
+
+        file_item = form["csvfile"]
+        if not getattr(file_item, "file", None):
+            return self.send_json({"error": "No file uploaded"}, 400)
+
+        try:
+            text = file_item.file.read().decode("utf-8-sig")
+            reader = csv.DictReader(io.StringIO(text))
+            rows = list(reader)
+            self.replace_table_from_csv(table, rows)
+            return self.send_json({"status": "ok", "imported": len(rows)})
+        except Exception as exc:  # noqa: BLE001
+            return self.send_json({"error": f"Import failed: {exc}"}, 400)
+
+    def replace_table_from_csv(self, table, rows):
+        with db_conn() as conn:
+            if table == "users":
+                conn.execute("DELETE FROM users")
+                for row in rows:
+                    conn.execute(
+                        "INSERT INTO users(id, name) VALUES (?, ?)",
+                        (int(row["id"]), row["name"].strip()),
+                    )
+            elif table == "budgets":
+                conn.execute("DELETE FROM budgets")
+                for row in rows:
+                    conn.execute(
+                        "INSERT INTO budgets(id, user_id, category_name, monthly_budget) VALUES (?, ?, ?, ?)",
+                        (int(row["id"]), int(row["user_id"]), row["category_name"].strip(), float(row["monthly_budget"])),
+                    )
+            else:
+                conn.execute("DELETE FROM expenses")
+                for row in rows:
+                    datetime.strptime(row["expense_date"], "%Y-%m-%d")
+                    conn.execute(
+                        "INSERT INTO expenses(id, user_id, budget_id, amount, expense_date) VALUES (?, ?, ?, ?, ?)",
+                        (
+                            int(row["id"]),
+                            int(row["user_id"]),
+                            int(row["budget_id"]),
+                            float(row["amount"]),
+                            row["expense_date"],
+                        ),
+                    )
 
     def read_json(self):
         length = int(self.headers.get("Content-Length", 0))
