@@ -1,15 +1,3 @@
-const STORAGE_KEY = "expense-tracker-state-v1";
-
-const defaultState = {
-  activeAccountId: "dev",
-  accounts: [
-    { id: "dev", name: "Dev", categories: [], expenses: [] },
-    { id: "devi", name: "Devi", categories: [], expenses: [] },
-  ],
-};
-
-const state = loadState();
-
 const els = {
   accountSelect: document.getElementById("accountSelect"),
   categoryForm: document.getElementById("categoryForm"),
@@ -32,124 +20,132 @@ const els = {
   transactionState: document.getElementById("transactionState"),
 };
 
+const state = {
+  users: [],
+  activeUserId: null,
+  budgets: [],
+  expenses: [],
+};
+
 init();
 
-function init() {
-  renderAccountSelect();
+async function init() {
   els.expenseDate.valueAsDate = new Date();
   wireEvents();
-  render();
+  await loadUsers();
+  await refreshData();
 }
 
 function wireEvents() {
-  els.accountSelect.addEventListener("change", () => {
-    state.activeAccountId = els.accountSelect.value;
-    persistState();
-    render();
+  els.accountSelect.addEventListener("change", async () => {
+    state.activeUserId = Number(els.accountSelect.value);
+    await refreshData();
   });
 
-  els.categoryForm.addEventListener("submit", (event) => {
+  els.categoryForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-
     const name = els.categoryName.value.trim();
     const budget = Number(els.categoryBudget.value);
 
-    if (!name || Number.isNaN(budget) || budget < 0) {
-      return;
-    }
+    if (!name || Number.isNaN(budget) || budget < 0) return;
 
-    const account = getActiveAccount();
-    const exists = account.categories.some(
-      (category) => category.name.toLowerCase() === name.toLowerCase()
-    );
-
-    if (exists) {
-      alert("Category already exists for this account.");
-      return;
-    }
-
-    account.categories.push({
-      id: crypto.randomUUID(),
-      name,
-      budget,
+    const res = await fetch(`/api/users/${state.activeUserId}/budgets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, budget }),
     });
 
+    if (!res.ok) {
+      const body = await res.json();
+      alert(body.error || "Could not add category");
+      return;
+    }
+
     els.categoryForm.reset();
-    persistState();
-    render();
+    await refreshData();
   });
 
-  els.expenseForm.addEventListener("submit", (event) => {
+  els.expenseForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-
-    const account = getActiveAccount();
-    const categoryId = els.expenseCategory.value;
+    const budgetId = Number(els.expenseCategory.value);
     const amount = Number(els.expenseAmount.value);
     const date = els.expenseDate.value;
 
-    if (!categoryId || Number.isNaN(amount) || amount <= 0 || !date) {
+    if (!budgetId || Number.isNaN(amount) || amount <= 0 || !date) return;
+
+    const res = await fetch(`/api/users/${state.activeUserId}/expenses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ budgetId, amount, date }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json();
+      alert(body.error || "Could not add expense");
       return;
     }
 
-    account.expenses.push({
-      id: crypto.randomUUID(),
-      categoryId,
-      amount,
-      date,
-    });
-
     els.expenseAmount.value = "";
-    persistState();
-    render();
+    await refreshData();
   });
 }
 
-function renderAccountSelect() {
-  els.accountSelect.innerHTML = "";
+async function loadUsers() {
+  const users = await fetchJson("/api/users");
+  state.users = users;
+  if (!state.activeUserId && users.length) state.activeUserId = users[0].id;
 
-  state.accounts.forEach((account) => {
+  els.accountSelect.innerHTML = "";
+  users.forEach((user) => {
     const option = document.createElement("option");
-    option.value = account.id;
-    option.textContent = account.name;
-    if (account.id === state.activeAccountId) option.selected = true;
+    option.value = user.id;
+    option.textContent = user.name;
+    if (user.id === state.activeUserId) option.selected = true;
     els.accountSelect.append(option);
   });
 }
 
-function render() {
-  const account = getActiveAccount();
-  const monthExpenses = getCurrentMonthExpenses(account);
+async function refreshData() {
+  if (!state.activeUserId) return;
 
-  renderCategoryList(account);
-  renderExpenseCategoryOptions(account);
-  renderDashboardMetrics(account, monthExpenses);
-  renderSummary(account, monthExpenses);
-  renderTransactions(account, monthExpenses);
+  const month = currentMonth();
+  const [budgets, expenses] = await Promise.all([
+    fetchJson(`/api/users/${state.activeUserId}/budgets`),
+    fetchJson(`/api/users/${state.activeUserId}/expenses?month=${month}`),
+  ]);
+
+  state.budgets = budgets;
+  state.expenses = expenses;
+  render();
 }
 
-function renderCategoryList(account) {
+function render() {
+  renderCategoryList();
+  renderExpenseCategoryOptions();
+  renderDashboardMetrics();
+  renderSummary();
+  renderTransactions();
+}
+
+function renderCategoryList() {
   els.categoryList.innerHTML = "";
-  const hasCategories = account.categories.length > 0;
+  const hasCategories = state.budgets.length > 0;
   els.categoryState.hidden = hasCategories;
 
-  account.categories.forEach((category) => {
+  state.budgets.forEach((category) => {
     const item = document.createElement("li");
     item.className = "list-item";
 
     const meta = document.createElement("div");
-    meta.innerHTML = `<strong>${category.name}</strong><div class="list-meta">Budget: ${currency(
-      category.budget
-    )}</div>`;
+    meta.innerHTML = `<strong>${category.name}</strong><div class="list-meta">Budget: ${currency(category.budget)}</div>`;
 
     const del = document.createElement("button");
     del.type = "button";
     del.className = "delete";
     del.textContent = "Delete";
-    del.addEventListener("click", () => {
-      account.categories = account.categories.filter((c) => c.id !== category.id);
-      account.expenses = account.expenses.filter((e) => e.categoryId !== category.id);
-      persistState();
-      render();
+    del.addEventListener("click", async () => {
+      await fetch(`/api/users/${state.activeUserId}/budgets/${category.id}`, { method: "DELETE" });
+      await refreshData();
     });
 
     item.append(meta, del);
@@ -157,21 +153,18 @@ function renderCategoryList(account) {
   });
 }
 
-function renderExpenseCategoryOptions(account) {
+function renderExpenseCategoryOptions() {
   els.expenseCategory.innerHTML = "";
-  const hasCategories = account.categories.length > 0;
-  const enableExpenseForm = hasCategories;
+  const hasCategories = state.budgets.length > 0;
 
   els.expenseForm
     .querySelectorAll("input, select, button")
-    .forEach((control) => (control.disabled = !enableExpenseForm));
+    .forEach((control) => (control.disabled = !hasCategories));
+
   els.expenseState.hidden = hasCategories;
+  if (!hasCategories) return;
 
-  if (!hasCategories) {
-    return;
-  }
-
-  account.categories.forEach((category) => {
+  state.budgets.forEach((category) => {
     const option = document.createElement("option");
     option.value = category.id;
     option.textContent = category.name;
@@ -179,18 +172,18 @@ function renderExpenseCategoryOptions(account) {
   });
 }
 
-function renderDashboardMetrics(account, monthExpenses) {
-  const totalBudget = account.categories.reduce((sum, category) => sum + category.budget, 0);
-  const totalSpent = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+function renderDashboardMetrics() {
+  const totalBudget = state.budgets.reduce((sum, category) => sum + Number(category.budget), 0);
+  const totalSpent = state.expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
 
-  const byCategorySpent = new Map();
-  monthExpenses.forEach((expense) => {
-    byCategorySpent.set(expense.categoryId, (byCategorySpent.get(expense.categoryId) || 0) + expense.amount);
+  const spentByCategory = new Map();
+  state.expenses.forEach((expense) => {
+    spentByCategory.set(expense.budgetId, (spentByCategory.get(expense.budgetId) || 0) + Number(expense.amount));
   });
 
-  const overspent = account.categories.filter((category) => {
-    const spent = byCategorySpent.get(category.id) || 0;
-    return spent > category.budget;
+  const overspent = state.budgets.filter((category) => {
+    const spent = spentByCategory.get(category.id) || 0;
+    return spent > Number(category.budget);
   }).length;
 
   els.totalBudget.textContent = currency(totalBudget);
@@ -199,27 +192,27 @@ function renderDashboardMetrics(account, monthExpenses) {
   els.overspentCount.textContent = String(overspent);
 }
 
-function renderSummary(account, monthExpenses) {
+function renderSummary() {
   els.summaryList.innerHTML = "";
-  const hasCategories = account.categories.length > 0;
+  const hasCategories = state.budgets.length > 0;
   els.summaryState.hidden = hasCategories;
 
-  const categorySpendMap = new Map();
-  monthExpenses.forEach((expense) => {
-    categorySpendMap.set(expense.categoryId, (categorySpendMap.get(expense.categoryId) || 0) + expense.amount);
+  const spentByCategory = new Map();
+  state.expenses.forEach((expense) => {
+    spentByCategory.set(expense.budgetId, (spentByCategory.get(expense.budgetId) || 0) + Number(expense.amount));
   });
 
-  account.categories.forEach((category) => {
-    const spent = categorySpendMap.get(category.id) || 0;
-    const pct = category.budget === 0 ? 0 : Math.round((spent / category.budget) * 100);
+  state.budgets.forEach((category) => {
+    const budget = Number(category.budget);
+    const spent = spentByCategory.get(category.id) || 0;
+    const pct = budget === 0 ? 0 : Math.round((spent / budget) * 100);
 
     const item = document.createElement("li");
     item.className = "list-item summary-row";
-
     item.innerHTML = `
       <div><strong>${category.name}</strong></div>
-      <div class="list-meta">${currency(spent)} / ${currency(category.budget)} (${pct}%)</div>
-      <div class="progress ${spent > category.budget ? "overspent" : ""}">
+      <div class="list-meta">${currency(spent)} / ${currency(budget)} (${pct}%)</div>
+      <div class="progress ${spent > budget ? "overspent" : ""}">
         <span style="width: ${Math.min(pct, 100)}%"></span>
       </div>
     `;
@@ -228,20 +221,18 @@ function renderSummary(account, monthExpenses) {
   });
 }
 
-function renderTransactions(account, monthExpenses) {
+function renderTransactions() {
   els.transactionList.innerHTML = "";
-  const sorted = [...monthExpenses].sort((a, b) => new Date(b.date) - new Date(a.date));
-
+  const sorted = [...state.expenses].sort((a, b) => new Date(b.date) - new Date(a.date));
   els.transactionState.hidden = sorted.length > 0;
 
   sorted.slice(0, 8).forEach((expense) => {
-    const category = account.categories.find((c) => c.id === expense.categoryId);
     const item = document.createElement("li");
     item.className = "list-item";
     item.innerHTML = `
       <div>
-        <strong>${category ? category.name : "Deleted Category"}</strong>
-        <div class="list-meta">${new Date(expense.date).toLocaleDateString()}</div>
+        <strong>${expense.categoryName || "Deleted Category"}</strong>
+        <div class="list-meta">${new Date(expense.date).toLocaleDateString("en-IN")}</div>
       </div>
       <strong>${currency(expense.amount)}</strong>
     `;
@@ -249,43 +240,21 @@ function renderTransactions(account, monthExpenses) {
   });
 }
 
-function getCurrentMonthExpenses(account) {
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-
-  return account.expenses.filter((expense) => {
-    const date = new Date(expense.date + "T00:00:00");
-    return date.getMonth() === currentMonth && date.getFullYear() === currentYear;
-  });
-}
-
-function getActiveAccount() {
-  return state.accounts.find((account) => account.id === state.activeAccountId) || state.accounts[0];
-}
-
-function loadState() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return structuredClone(defaultState);
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed.accounts) || !parsed.accounts.length) {
-      return structuredClone(defaultState);
-    }
-    return parsed;
-  } catch {
-    return structuredClone(defaultState);
-  }
-}
-
-function persistState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
 function currency(value) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-  }).format(value);
+  }).format(Number(value));
+}
+
+function currentMonth() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${now.getFullYear()}-${month}`;
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Request failed: ${url}`);
+  return res.json();
 }
